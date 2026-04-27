@@ -3,3 +3,7 @@
 //! Contains all buffer management, cursor logic, and edit operations.
 //! Has no dependency on any rendering framework so alternative frontends
 //! can reuse it unchanged.
+
+pub mod error;
+
+pub use error::EditorError;
