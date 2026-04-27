@@ -1,5 +1,9 @@
 //! Entry point for the vasek-edit terminal editor.
 
-fn main() {
-    println!("vasek-edit: not yet implemented");
+mod logging;
+
+fn main() -> anyhow::Result<()> {
+    logging::init()?;
+    tracing::info!("vasek-edit starting");
+    Ok(())
 }
