@@ -6,6 +6,8 @@
 
 pub mod buffer;
 pub mod error;
+pub mod piece_table;
 
 pub use buffer::Buffer;
 pub use error::EditorError;
+pub use piece_table::PieceTable;
