@@ -4,6 +4,8 @@
 //! Has no dependency on any rendering framework so alternative frontends
 //! can reuse it unchanged.
 
+pub mod buffer;
 pub mod error;
 
+pub use buffer::Buffer;
 pub use error::EditorError;
