@@ -1,0 +1,15 @@
+[package]
+name = "editor-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "vasek-gui"
+path = "src/main.rs"
+
+[dependencies]
+editor-core = { path = "../editor-core" }
+eframe = { version = "0.34", default-features = true }
+anyhow = "1"
+rfd = "0.17"
