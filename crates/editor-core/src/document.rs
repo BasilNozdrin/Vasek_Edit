@@ -95,6 +95,11 @@ impl Document {
         &self.path
     }
 
+    /// The line-ending convention detected on load.
+    pub fn line_ending(&self) -> LineEnding {
+        self.line_ending
+    }
+
     /// Number of lines in the buffer.
     pub fn line_count(&self) -> usize {
         self.buf.line_count()
@@ -352,18 +357,15 @@ mod tests {
         std::env::temp_dir().join(format!("vasek_doc_{tag}_{}.txt", std::process::id()))
     }
 
-    fn make_doc(content: &str) -> Document {
-        let p = temp_path("mk");
-        fs::write(&p, content).unwrap();
-        Document::open(&p).unwrap()
-    }
-
     #[test]
     fn open_lf_lines() {
-        let doc = make_doc("hello\nworld\n");
+        let p = temp_path("open_lf");
+        fs::write(&p, "hello\nworld\n").unwrap();
+        let doc = Document::open(&p).unwrap();
         assert_eq!(doc.line_count(), 3);
         assert_eq!(doc.line_at(0).unwrap().as_ref(), "hello");
         assert_eq!(doc.line_at(1).unwrap().as_ref(), "world");
+        fs::remove_file(&p).ok();
     }
 
     #[test]
@@ -400,19 +402,25 @@ mod tests {
 
     #[test]
     fn insert_sets_dirty_and_moves_cursor() {
-        let mut doc = make_doc("");
+        let p = temp_path("insert_dirty");
+        fs::write(&p, "").unwrap();
+        let mut doc = Document::open(&p).unwrap();
         assert!(!doc.is_dirty());
         doc.insert_at_cursor("ab\ncd");
         assert!(doc.is_dirty());
         assert_eq!(doc.cursor.line, 1);
         assert_eq!(doc.cursor.col, 2);
+        fs::remove_file(&p).ok();
     }
 
     #[test]
     fn backspace_at_origin_is_noop() {
-        let mut doc = make_doc("hi");
+        let p = temp_path("backspace");
+        fs::write(&p, "hi").unwrap();
+        let mut doc = Document::open(&p).unwrap();
         doc.backspace();
         assert_eq!(doc.line_at(0).unwrap().as_ref(), "hi");
+        fs::remove_file(&p).ok();
     }
 
     #[test]

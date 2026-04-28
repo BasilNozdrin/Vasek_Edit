@@ -65,8 +65,15 @@ fn run_app(
     app: &mut App,
 ) -> anyhow::Result<()> {
     loop {
-        let editor_height = terminal.size()?.height.saturating_sub(2) as usize;
-        app.scroll_to_cursor(editor_height);
+        let sz = terminal.size()?;
+        let editor_height = sz.height.saturating_sub(2) as usize;
+        let lc = app.doc.line_count();
+        let editor_width = ui::text_area_width(
+            ratatui::layout::Rect::new(0, 0, sz.width, sz.height),
+            app.show_line_numbers,
+            lc,
+        );
+        app.scroll_to_cursor(editor_height, editor_width);
         terminal.draw(|frame| ui::render(frame, app))?;
 
         if let Event::Key(key) = event::read()? {
@@ -112,6 +119,16 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
         // Ctrl-S quick save
         KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             save(app);
+        }
+        // Toggles
+        KeyCode::F(1) => {
+            app.show_line_numbers = !app.show_line_numbers;
+        }
+        KeyCode::F(2) => {
+            app.soft_wrap = !app.soft_wrap;
+            if app.soft_wrap {
+                app.scroll_left = 0;
+            }
         }
         // Cursor movement — guarded arms must precede unguarded ones.
         KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => app.doc.word_left(),
@@ -237,8 +254,8 @@ fn save(app: &mut App) {
 }
 
 fn page_height(app: &App) -> usize {
-    // Best-effort: we don't have terminal size here, so use scroll_top context.
-    // The real height is passed into scroll_to_cursor each frame.
+    // Approximate: the scroll offset is updated each frame with the real
+    // height; 20 is a safe default when the terminal size isn't at hand.
     let _ = app;
     20
 }
