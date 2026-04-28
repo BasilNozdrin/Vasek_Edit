@@ -6,6 +6,7 @@ mod ui;
 
 use std::io;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use anyhow::Context;
 use crossterm::{
@@ -76,8 +77,13 @@ fn run_app(
         app.scroll_to_cursor(editor_height, editor_width);
         terminal.draw(|frame| ui::render(frame, app))?;
 
-        if let Event::Key(key) = event::read()? {
-            handle_key(app, key);
+        if event::poll(Duration::from_millis(500))? {
+            if let Event::Key(key) = event::read()? {
+                handle_key(app, key);
+            }
+        } else {
+            // 500 ms idle — flush any pending coalesced insert
+            app.doc.flush_history();
         }
 
         if app.should_quit {
@@ -130,6 +136,23 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
                 app.scroll_left = 0;
             }
         }
+        // Undo / redo  (guard doubles as the call — side effect is intentional)
+        KeyCode::Char('u') if !app.doc.undo() => {
+            app.message = "Already at oldest change".into();
+        }
+        KeyCode::Char('u') => {}
+        KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) && !app.doc.undo() => {
+            app.message = "Already at oldest change".into();
+        }
+        KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) && !app.doc.redo() => {
+            app.message = "Already at newest change".into();
+        }
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) && !app.doc.redo() => {
+            app.message = "Already at newest change".into();
+        }
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
         // Cursor movement — guarded arms must precede unguarded ones.
         KeyCode::Left if key.modifiers.contains(KeyModifiers::CONTROL) => app.doc.word_left(),
         KeyCode::Right if key.modifiers.contains(KeyModifiers::CONTROL) => app.doc.word_right(),
@@ -156,8 +179,17 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
 fn handle_insert(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
+            app.doc.flush_history();
             app.mode = Mode::Normal;
         }
+        KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) && !app.doc.undo() => {
+            app.message = "Already at oldest change".into();
+        }
+        KeyCode::Char('z') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) && !app.doc.redo() => {
+            app.message = "Already at newest change".into();
+        }
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {}
         KeyCode::Enter => {
             app.doc.insert_at_cursor("\n");
         }

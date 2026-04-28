@@ -98,6 +98,21 @@ impl PieceTable {
         }
     }
 
+    /// Convert a flat byte offset to `(line, col)` using the newline index.
+    ///
+    /// Clamps `offset` to `[0, self.len()]`. The returned `col` is a byte
+    /// column within the line.
+    pub fn offset_to_line_col(&self, offset: usize) -> (usize, usize) {
+        let offset = offset.min(self.total_bytes);
+        let line = self.newline_offsets.partition_point(|&nl| nl < offset);
+        let line_start = if line == 0 {
+            0
+        } else {
+            self.newline_offsets[line - 1] + 1
+        };
+        (line, offset - line_start)
+    }
+
     /// Content of line `line` (0-indexed), without the trailing `\n`.
     ///
     /// Returns `None` if `line >= self.line_count()`.

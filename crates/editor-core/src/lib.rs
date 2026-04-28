@@ -8,10 +8,12 @@ pub mod buffer;
 pub mod cursor;
 pub mod document;
 pub mod error;
+pub mod history;
 pub mod piece_table;
 
 pub use buffer::Buffer;
 pub use cursor::Cursor;
 pub use document::{Document, LineEnding};
 pub use error::EditorError;
+pub use history::{EditOp, History};
 pub use piece_table::PieceTable;
