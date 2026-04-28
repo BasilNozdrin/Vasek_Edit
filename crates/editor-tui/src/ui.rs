@@ -1,9 +1,9 @@
 //! Terminal rendering for vasek-edit.
 //!
 //! Layout (top to bottom):
-//!   - Editor area  (variable height, fills available space)
-//!   - Status bar   (1 row)
-//!   - Command line (1 row)
+//! - Editor area (variable height): content pane + optional minimap (1 col)
+//! - Status bar (1 row)
+//! - Command line (1 row)
 
 use ratatui::{
     layout::{Constraint, Layout, Position, Rect},
@@ -14,6 +14,9 @@ use ratatui::{
 };
 
 use crate::app::{App, Mode};
+
+/// Width (in columns) of the minimap column.
+pub const MINIMAP_WIDTH: u16 = 1;
 
 /// Render the full editor UI onto `frame`.
 pub fn render(frame: &mut Frame, app: &App) {
@@ -29,10 +32,32 @@ pub fn render(frame: &mut Frame, app: &App) {
     let status_area = chunks[1];
     let cmd_area = chunks[2];
 
-    render_editor(frame, app, editor_area);
+    let content_area = split_editor_area(editor_area, app);
+    render_editor(frame, app, content_area);
+    if app.show_minimap {
+        let minimap_area = Rect {
+            x: editor_area.right().saturating_sub(MINIMAP_WIDTH),
+            y: editor_area.y,
+            width: MINIMAP_WIDTH.min(editor_area.width),
+            height: editor_area.height,
+        };
+        render_minimap(frame, app, minimap_area);
+    }
     render_status(frame, app, status_area);
     render_cmdline(frame, app, cmd_area);
-    place_cursor(frame, app, editor_area, cmd_area);
+    place_cursor(frame, app, content_area, cmd_area);
+}
+
+/// Return the content (text) pane rect, accounting for the optional minimap.
+fn split_editor_area(editor_area: Rect, app: &App) -> Rect {
+    if app.show_minimap && editor_area.width > MINIMAP_WIDTH {
+        Rect {
+            width: editor_area.width - MINIMAP_WIDTH,
+            ..editor_area
+        }
+    } else {
+        editor_area
+    }
 }
 
 // ── editor area ──────────────────────────────────────────────────────────────
@@ -54,9 +79,7 @@ fn render_editor(frame: &mut Frame, app: &App, area: Rect) {
     if app.soft_wrap {
         para = para.wrap(Wrap { trim: false });
     } else {
-        // Horizontal scroll is applied by trimming the leading bytes in each
-        // line span — ratatui's Paragraph has no built-in x-scroll, so we
-        // handle it in build_editor_line.
+        // Horizontal scroll is applied by trimming leading bytes in each span.
     }
     frame.render_widget(para, area);
 }
@@ -84,7 +107,6 @@ fn build_editor_line(app: &App, li: usize, lc: usize, gutter_w: usize) -> Line<'
     let visible: String = if app.soft_wrap || app.scroll_left == 0 {
         raw
     } else if app.scroll_left < raw.len() {
-        // Advance to a valid char boundary at or after scroll_left.
         let mut sl = app.scroll_left;
         while sl < raw.len() && !raw.is_char_boundary(sl) {
             sl += 1;
@@ -104,6 +126,65 @@ fn build_editor_line(app: &App, li: usize, lc: usize, gutter_w: usize) -> Line<'
     };
 
     Line::from(vec![num_span, Span::raw(visible)])
+}
+
+// ── minimap ───────────────────────────────────────────────────────────────────
+
+fn render_minimap(frame: &mut Frame, app: &App, area: Rect) {
+    let height = area.height as usize;
+    if height == 0 {
+        return;
+    }
+    let total_lines = app.doc.line_count().max(1);
+    let editor_height = height; // same as minimap height
+
+    let lines: Vec<Line<'static>> = (0..height)
+        .map(|row| minimap_row(app, row, height, total_lines, editor_height))
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), area);
+}
+
+fn minimap_row(
+    app: &App,
+    row: usize,
+    minimap_height: usize,
+    total_lines: usize,
+    editor_height: usize,
+) -> Line<'static> {
+    // Which source line does this minimap row represent?
+    let src_line = row * total_lines / minimap_height;
+
+    // Is this row inside the current viewport?
+    let in_viewport =
+        src_line >= app.scroll_top && src_line < app.scroll_top.saturating_add(editor_height);
+
+    // Does the source line have any visible content?
+    let has_content = app
+        .doc
+        .line_at(src_line)
+        .map(|l| !l.trim().is_empty())
+        .unwrap_or(false);
+
+    let ch = if has_content { '\u{258c}' } else { ' ' }; // ▌ or space
+
+    let style = if in_viewport {
+        Style::default()
+            .fg(Color::White)
+            .bg(Color::Blue)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    Line::from(Span::styled(ch.to_string(), style))
+}
+
+/// Convert a minimap row click to the target source line.
+pub fn minimap_click_to_line(mouse_row: u16, minimap_height: u16, total_lines: usize) -> usize {
+    let h = minimap_height.max(1) as usize;
+    let row = mouse_row as usize;
+    (row * total_lines.max(1) / h).min(total_lines.saturating_sub(1))
 }
 
 // ── status bar ───────────────────────────────────────────────────────────────
@@ -168,14 +249,14 @@ fn render_cmdline(frame: &mut Frame, app: &App, area: Rect) {
 
 // ── cursor placement ─────────────────────────────────────────────────────────
 
-fn place_cursor(frame: &mut Frame, app: &App, editor_area: Rect, cmd_area: Rect) {
+fn place_cursor(frame: &mut Frame, app: &App, content_area: Rect, cmd_area: Rect) {
     match &app.mode {
         Mode::Command(cmd) => {
             frame.set_cursor_position(Position::new(cmd_area.x + 1 + cmd.len() as u16, cmd_area.y));
         }
         _ => {
             let row = app.doc.cursor.line.saturating_sub(app.scroll_top);
-            if row >= editor_area.height as usize {
+            if row >= content_area.height as usize {
                 return;
             }
             let lc = app.doc.line_count();
@@ -184,12 +265,11 @@ fn place_cursor(frame: &mut Frame, app: &App, editor_area: Rect, cmd_area: Rect)
             } else {
                 0
             };
-            // Visual column: byte col minus the horizontal scroll offset.
             let vcol = app.doc.cursor.col.saturating_sub(app.scroll_left);
             let col = gutter_w + vcol;
             frame.set_cursor_position(Position::new(
-                (editor_area.x + col as u16).min(editor_area.right().saturating_sub(1)),
-                editor_area.y + row as u16,
+                (content_area.x + col as u16).min(content_area.right().saturating_sub(1)),
+                content_area.y + row as u16,
             ));
         }
     }
@@ -203,14 +283,24 @@ fn gutter_width(line_count: usize) -> usize {
     line_count.max(1).to_string().len()
 }
 
-/// Visible-column width of the editor text area.
-pub fn text_area_width(area: Rect, show_line_numbers: bool, line_count: usize) -> usize {
+/// Visible-column width of the editor text area (excluding gutter and minimap).
+pub fn text_area_width(
+    area: Rect,
+    show_line_numbers: bool,
+    line_count: usize,
+    show_minimap: bool,
+) -> usize {
     let gw = if show_line_numbers {
         gutter_width(line_count) + 1
     } else {
         0
     };
-    (area.width as usize).saturating_sub(gw)
+    let mw = if show_minimap {
+        MINIMAP_WIDTH as usize
+    } else {
+        0
+    };
+    (area.width as usize).saturating_sub(gw + mw)
 }
 
 #[cfg(test)]
@@ -228,8 +318,16 @@ mod tests {
     #[test]
     fn text_area_width_with_gutter() {
         let area = Rect::new(0, 0, 80, 24);
-        // 4-digit gutter (1000+ lines) + space = 5 cols → 75 text cols
-        assert_eq!(text_area_width(area, true, 1000), 75);
-        assert_eq!(text_area_width(area, false, 1000), 80);
+        // 4-digit gutter (1000+ lines) + space = 5 cols, minimap 1 → 74 text cols
+        assert_eq!(text_area_width(area, true, 1000, true), 74);
+        assert_eq!(text_area_width(area, false, 1000, false), 80);
+    }
+
+    #[test]
+    fn minimap_click_maps_to_correct_line() {
+        // 100 lines, 50-row minimap → row 10 → line 20
+        assert_eq!(minimap_click_to_line(10, 50, 100), 20);
+        // Clamp: row == height-1 → last line
+        assert_eq!(minimap_click_to_line(49, 50, 100), 98);
     }
 }

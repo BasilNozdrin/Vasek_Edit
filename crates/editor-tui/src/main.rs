@@ -10,7 +10,10 @@ use std::time::Duration;
 
 use anyhow::Context;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseButton, MouseEvent, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -50,13 +53,17 @@ fn parse_args() -> anyhow::Result<PathBuf> {
 fn setup_terminal() -> anyhow::Result<Terminal<CrosstermBackend<io::Stdout>>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     Ok(Terminal::new(CrosstermBackend::new(stdout))?)
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Result<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal.show_cursor()?;
     Ok(())
 }
@@ -73,13 +80,16 @@ fn run_app(
             ratatui::layout::Rect::new(0, 0, sz.width, sz.height),
             app.show_line_numbers,
             lc,
+            app.show_minimap,
         );
         app.scroll_to_cursor(editor_height, editor_width);
         terminal.draw(|frame| ui::render(frame, app))?;
 
         if event::poll(Duration::from_millis(500))? {
-            if let Event::Key(key) = event::read()? {
-                handle_key(app, key);
+            match event::read()? {
+                Event::Key(key) => handle_key(app, key),
+                Event::Mouse(mouse) => handle_mouse(app, mouse, sz.width, sz.height),
+                _ => {}
             }
         } else {
             // 500 ms idle — flush any pending coalesced insert
@@ -135,6 +145,9 @@ fn handle_normal(app: &mut App, key: KeyEvent) {
             if app.soft_wrap {
                 app.scroll_left = 0;
             }
+        }
+        KeyCode::F(3) => {
+            app.show_minimap = !app.show_minimap;
         }
         // Undo / redo  (guard doubles as the call — side effect is intentional)
         KeyCode::Char('u') if !app.doc.undo() => {
@@ -290,4 +303,31 @@ fn page_height(app: &App) -> usize {
     // height; 20 is a safe default when the terminal size isn't at hand.
     let _ = app;
     20
+}
+
+// ── mouse handling ────────────────────────────────────────────────────────────
+
+fn handle_mouse(app: &mut App, mouse: MouseEvent, term_width: u16, term_height: u16) {
+    if !app.show_minimap {
+        return;
+    }
+    // Minimap occupies the last column of the editor area (rows 0..height-2).
+    let minimap_col = term_width.saturating_sub(ui::MINIMAP_WIDTH);
+    let editor_rows = term_height.saturating_sub(2);
+    if mouse.column < minimap_col || mouse.row >= editor_rows {
+        return;
+    }
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left) => {
+            jump_to_minimap_row(app, mouse.row, editor_rows);
+        }
+        _ => {}
+    }
+}
+
+fn jump_to_minimap_row(app: &mut App, mouse_row: u16, minimap_height: u16) {
+    let total_lines = app.doc.line_count();
+    let target = ui::minimap_click_to_line(mouse_row, minimap_height, total_lines);
+    app.doc.cursor.line = target;
+    app.doc.flush_history();
 }

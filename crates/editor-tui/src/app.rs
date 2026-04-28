@@ -27,6 +27,8 @@ pub struct App {
     pub show_line_numbers: bool,
     /// Whether soft word-wrap is active.
     pub soft_wrap: bool,
+    /// Whether the right-side scrollbar minimap is visible.
+    pub show_minimap: bool,
 }
 
 impl App {
@@ -41,6 +43,7 @@ impl App {
             should_quit: false,
             show_line_numbers: true,
             soft_wrap: false,
+            show_minimap: true,
         }
     }
 
